@@ -128,8 +128,8 @@ void InitializeADCs(void)
     AD3CH1CON1bits.SAMC = 3;       /* Fast sample (low Z from OA3 output) */
     AD3CH1CON1bits.FRAC = 0;       /* right-aligned (LEFT equivalent) */
     AD3CH1CON1bits.DIFF = 0;
-#if FEATURE_IBUS_ONCENTER
-    AD3CH1CON1bits.TRG1SRC = 5;    /* PG1TRIGB = PWM1 Trigger 2 = pulse-center (true bus current) */
+#if FEATURE_IBUS_ONCENTER || FEATURE_BUS_BOTH_ONCENTER
+    AD3CH1CON1bits.TRG1SRC = 5;    /* PG1TRIGB = PWM1 Trigger 2 = mid-ON pulse (true bus current) */
 #else
     AD3CH1CON1bits.TRG1SRC = 4;    /* PG1TRIGA = PWM1 Trigger 1 = freewheel-center (BEMF-shared) */
 #endif
@@ -335,10 +335,16 @@ void InitializeADCs(void)
      * the 106, confirmed by AN957 adc.c). IA/IB (CH0s) and IBUS already
      * have TRG1SRC=4 from their config blocks above. */
     AD2CH1CON1bits.TRG1SRC = 4;    /* POT from PWM1 trigger */
-    /* VBUS stays on ADTR1/MPER/2 (freewheel center) — the proven-clean instant.
-     * Only bus current moves to ADTR2 (now an OFFSET into the ON pulse, not the
-     * noisy count-0 boundary — see PG1TRIGB). */
-    AD3CH2CON1bits.TRG1SRC = 4;    /* VBUS from PWM1 trigger (MPER/2) */
+    /* Bus-current trigger: with FEATURE_BUS_BOTH_ONCENTER (Exp 1a) BOTH AD3
+     * conversions (IBUS + VBUS) ride PG1TRIGB (mid-ON) so AD3 fires at ONE
+     * instant. Otherwise VBUS stays on ADTR1/MPER/2 (freewheel, proven-clean)
+     * and only IBUS moves to ADTR2 (the split that broke high-speed). */
+#if FEATURE_BUS_BOTH_ONCENTER
+    AD3CH2CON1bits.TRG1SRC = 5;    /* Exp 1a: VBUS joins IBUS on PG1TRIGB (mid-ON) — AD3 fires
+                                    * at ONE instant, never split. VBUS@mid-ON is harmless. */
+#else
+    AD3CH2CON1bits.TRG1SRC = 4;    /* VBUS from PWM1 trigger (MPER/2 freewheel) */
+#endif
 #if !FEATURE_FOC && !FEATURE_FOC_V2 && !FEATURE_FOC_V3 && !FEATURE_FOC_AN1078 && !FEATURE_IF_STARTUP
     AD1CH3CON1bits.TRG1SRC = 4;    /* Phase B (VB) from PWM1 trigger */
     AD1CH4CON1bits.TRG1SRC = 4;    /* Phase A (VA) from PWM1 trigger */

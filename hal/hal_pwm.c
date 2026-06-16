@@ -276,7 +276,7 @@ void InitPWMGenerator1(void)
     PG1EVT1bits.SIEN = 0;
     PG1EVT1bits.IEVTSEL = 3;       /* Time base interrupts disabled */
     PG1EVT2bits.ADTR2EN3 = 0;
-#if FEATURE_IBUS_ONCENTER || AK512_ADTR2_ISOLATION_TEST
+#if FEATURE_IBUS_ONCENTER || FEATURE_BUS_BOTH_ONCENTER || AK512_ADTR2_ISOLATION_TEST
     PG1EVT2bits.ADTR2EN2 = 1;      /* ADTR2 (PWM1 Trigger 2) sourced from PG1TRIGB
                                     * = pulse-center -> bus current (AN957 samples all
                                     * currents at TRIGA=0; we use TRIGB=0 on ADTR2 so
@@ -488,9 +488,17 @@ void InitPWMGenerator1(void)
      * threshold (rawThresh = vbusRaw*duty) -> commutation desync + false UV at
      * high speed. Offset MPER/8 into the up-count ON pulse instead: still inside
      * conduction for duty >~25% (the high-speed regime), clear of the boundary. */
-#if FEATURE_IBUS_ONCENTER || AK512_ADTR2_ISOLATION_TEST
+#if FEATURE_BUS_BOTH_ONCENTER
+    /* Exp 1a': TRUE pulse-center = the documented "DC-link carries full motor
+     * current" instant (CAHALF=1, TRIGB=0, period center, t≈11.1us). In
+     * center-aligned PWM the ON pulse stays centered here at ANY duty, so the
+     * bus shunt is always sampled mid-conduction — fixes the ~0 reads at
+     * low/mid duty that MPER/8 gave (it fell outside the pulse below ~25%). */
+    PG1TRIGBbits.CAHALF = 1;
+    PG1TRIGBbits.TRIGB  = 0;
+#elif FEATURE_IBUS_ONCENTER || AK512_ADTR2_ISOLATION_TEST
     PG1TRIGBbits.CAHALF = 0;
-    PG1TRIGBbits.TRIGB  = (uint32_t)(LOOPTIME_TCY / 8);
+    PG1TRIGBbits.TRIGB  = (uint32_t)(LOOPTIME_TCY / 8);  /* MPER/8 into the up-count ON pulse (split-era) */
 #else
     PG1TRIGB    = 0x0000;
 #endif

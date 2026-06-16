@@ -3105,6 +3105,14 @@ void __attribute__((__interrupt__, no_auto_psv)) GARUDA_ADC_INTERRUPT(void)
 #elif FEATURE_BEMF_CLOSED_LOOP
         case ESC_CLOSED_LOOP:
         {
+#if FEATURE_HANDOFF_CHOP
+            /* Handoff-chop arm latch: set at CL entry (below) BEFORE the
+             * coast-listen block can `break` and skip the rest of the case,
+             * then consumed by the handoff-chop block once driving resumes.
+             * Fixes the chop never arming on the coast-listen entry path
+             * (2810) — the old `prevAdcState != CL` arm was eaten by the break. */
+            static bool hcArmPending = false;
+#endif
             /* Throttle-zero shutdown: if pot returns to zero after being raised,
              * gracefully stop. Don't wait for desync — at low duty the HW ZC
              * comparator can trigger on noise indefinitely, keeping the motor
@@ -3121,6 +3129,9 @@ void __attribute__((__interrupt__, no_auto_psv)) GARUDA_ADC_INTERRUPT(void)
                 {
                     hasSeenThrottle = false;
                     zeroThrottleCount = 0;
+#if FEATURE_HANDOFF_CHOP
+                    hcArmPending = true;   /* arm entry chop before any coast-listen break */
+#endif
                 }
 
                 if (garudaData.throttle >= ARM_THROTTLE_ZERO_ADC)
@@ -3860,11 +3871,38 @@ void __attribute__((__interrupt__, no_auto_psv)) GARUDA_ADC_INTERRUPT(void)
 #endif
                 if (mappedDuty > cap) mappedDuty = cap;
 
+#if FEATURE_CL_ENTRY_SOFTSTART
+                /* CL-ENTRY SOFT-START: cap duty to a ceiling that ramps linearly
+                 * from CL_ENTRY_START_DUTY up to the requested (idle) duty over
+                 * CL_ENTRY_RAMP_TICKS. The phase current then builds gradually
+                 * with the rising BEMF instead of stepping to full idle duty
+                 * against ~0 BEMF at entry -> smaller inrush PEAK + longer ramp,
+                 * final idle speed unchanged. Stops limiting once the ceiling
+                 * reaches the idle floor. */
+                {
+                    static uint16_t clEntryTick = CL_ENTRY_RAMP_TICKS;
+                    if (prevAdcState != ESC_CLOSED_LOOP)
+                        clEntryTick = 0;                 /* arm at CL entry */
+                    if (clEntryTick < CL_ENTRY_RAMP_TICKS) {
+                        uint32_t span = (RT_CL_IDLE_DUTY > CL_ENTRY_START_DUTY)
+                                      ? (RT_CL_IDLE_DUTY - CL_ENTRY_START_DUTY) : 0u;
+                        uint32_t entryCeil = CL_ENTRY_START_DUTY +
+                            ((span * (uint32_t)clEntryTick) / CL_ENTRY_RAMP_TICKS);
+                        if (mappedDuty > entryCeil) mappedDuty = entryCeil;
+                        clEntryTick++;
+                    }
+                }
+#endif
+
 #if FEATURE_DUTY_SLEW
                 {
                     static uint32_t prevDuty = 0;
                     if (prevAdcState != ESC_CLOSED_LOOP)
+#if FEATURE_CL_ENTRY_SOFTSTART
+                        prevDuty = CL_ENTRY_START_DUTY;  /* low baseline so the soft-start ramp isn't fought by a down-slew */
+#else
                         prevDuty = garudaData.duty;
+#endif
 
                     /* Post-sync settle: use reduced slew-up rate for
                      * POST_SYNC_SETTLE_MS after ZC lock. This prevents
@@ -4229,7 +4267,8 @@ void __attribute__((__interrupt__, no_auto_psv)) GARUDA_ADC_INTERRUPT(void)
                 {
                     static uint16_t hcCtr = 0;
                     static bool hcActive = false;
-                    if (prevAdcState != ESC_CLOSED_LOOP) {
+                    if (hcArmPending) {        /* armed at CL entry; survives the coast-listen break */
+                        hcArmPending = false;
                         hcActive = true;
                         hcCtr = 0;
                     }

@@ -422,7 +422,7 @@ static void HandleSaveConfig(const uint8_t *payload, uint8_t payloadLen)
     (void)payload;
     (void)payloadLen;
 
-#if FEATURE_EEPROM_V2
+#if FEATURE_EEPROM_V2 && FEATURE_GSP_EEPROM
     uint32_t remaining = EEPROM_GetCooldownRemainingMs(garudaData.systemTick);
     if (remaining > 0) {
         uint8_t resp[2];
@@ -542,7 +542,7 @@ static void HandleLoadProfile(const uint8_t *payload, uint8_t payloadLen)
     /* Auto-save profile to EEPROM so it persists across resets.
      * Without this, selecting A2212 in GUI then resetting reverts
      * to compile-time MOTOR_PROFILE (Hurst). */
-#if FEATURE_EEPROM_V2
+#if FEATURE_EEPROM_V2 && FEATURE_GSP_EEPROM
     {
         GARUDA_CONFIG_T cfg;
         EEPROM_LoadConfig(&cfg);

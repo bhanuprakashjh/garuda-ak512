@@ -104,8 +104,12 @@ static const GSP_PARAMS_T profileDefaults[7] = {
         .rampTargetErpm     = 3000,
         .rampAccelErpmPerS  = 3000,    /* Faster ramp for bench (200→3000 eRPM in ~1s) */
         .rampDutyPct        = 15,
-        .clIdleDutyPct      = 12,
-        .timingAdvMaxDeg    = 22,    /* Bumped from 15 for >90k eRPM margin */
+        .clIdleDutyPct      = 8,     /* 2026-06-16 12->8: CL idle duty is the startup-inrush driver
+                                      * (duty vs near-zero low-speed BEMF on 0.065R A2212). 12%=~14A,
+                                      * 8% ~9A. Idle speed drops ~13k->~9k. Raise if ZC roughens. */
+        .timingAdvMaxDeg    = 23,    /* 2026-06-16 back to 23 (26 over-advanced, 20 no better) — sweet
+                                      * spot near the prior 22. Ramps 0deg@3k -> 23deg@maxCLerpm.
+                                      * Live-tunable (PARAM_ID_TIMING_ADV_MAX_DEG) — A/B 22 vs 23 live. */
         .hwzcCrossoverErpm  = 1500,
         .ocSwLimitMa        = 15000, /* Bumped from 8000 — avg bench current low */
         .ocFaultMa          = 22000, /* Bumped from 18000 — leave headroom above CMP3 */
@@ -985,6 +989,7 @@ uint8_t GSP_ParamsGetActiveProfile(void)
  * (possibly after clamping), false if invariants are violated
  * and the caller should fall back to profile defaults.
  */
+#if FEATURE_GSP_EEPROM   /* EEPROM-only helpers: compiled only for production builds */
 static bool SanitizeLoadedParams(void)
 {
     /* Validate activeProfile */
@@ -1064,9 +1069,17 @@ static uint16_t GSP_DefaultsSignature(void)
     return GSP_Crc16((const uint8_t *)&profileDefaults[idx],
                      (uint16_t)sizeof(profileDefaults[0]));
 }
+#endif /* FEATURE_GSP_EEPROM (helpers) */
 
 void GSP_ParamsLoadFromConfig(const void *cfg)
 {
+#if !FEATURE_GSP_EEPROM
+    /* DEVELOPMENT (FEATURE_GSP_EEPROM=0): code is the single source of truth.
+     * Ignore the EEPROM overlay entirely so gsp_params.c profileDefaults[] always
+     * win and no stale EEPROM can shadow a code edit. */
+    (void)cfg;
+    return;
+#else
     const uint8_t *base = (const uint8_t *)cfg;
 
     /* Tier 3: reject stale EEPROM whose stored defaults-signature does not match
@@ -1205,10 +1218,18 @@ void GSP_ParamsLoadFromConfig(const void *cfg)
             FallbackToProfileDefaults();
     }
     /* else: unknown marker — keep compile-time defaults */
+#endif /* FEATURE_GSP_EEPROM */
 }
 
 void GSP_ParamsSaveToConfig(void *cfg)
 {
+#if !FEATURE_GSP_EEPROM
+    /* DEVELOPMENT (FEATURE_GSP_EEPROM=0): never persist to NVM. Live GSP tuning
+     * stays RAM-only and reverts to the compiled defaults on the next power cycle,
+     * so no stale state can accumulate in EEPROM. */
+    (void)cfg;
+    return;
+#else
     uint8_t *base = (uint8_t *)cfg;
     GSP_CONFIG_PERSIST_V3_T persist;
     memset(&persist, 0, sizeof(persist));
@@ -1272,6 +1293,7 @@ void GSP_ParamsSaveToConfig(void *cfg)
      * accepted on reload only while profileDefaults[MOTOR_PROFILE] is unchanged. */
     uint16_t sig = GSP_DefaultsSignature();
     memcpy(base + GSP_DEFAULTS_SIG_OFFSET, &sig, sizeof(sig));
+#endif /* FEATURE_GSP_EEPROM */
 }
 
 #endif /* FEATURE_GSP */

@@ -528,6 +528,13 @@ _Static_assert(OC_CMP3_HANDOFF_DAC > OC_BIAS_COUNTS,
                "hand-off chop must be above the zero-current bias");
 #endif
 
+/* CL-entry soft-start derived constants (see FEATURE_CL_ENTRY_SOFTSTART). */
+#if FEATURE_CL_ENTRY_SOFTSTART
+#define CL_ENTRY_START_DUTY  (uint32_t)((CL_ENTRY_START_PCT / 100.0f) * LOOPTIME_TCY)
+#define CL_ENTRY_RAMP_TICKS  ((uint16_t)((uint32_t)CL_ENTRY_RAMP_MS * PWMFREQUENCY_HZ / 1000))
+_Static_assert(CL_ENTRY_RAMP_TICKS > 0, "CL-entry ramp must span >=1 tick");
+#endif
+
 /* I-f spin-up derived constants (the control loop runs in the 24kHz ADC ISR). */
 #if FEATURE_IF_STARTUP
 #define IF_ERPM_TO_RAD_S(e)  ((float)(e) * 0.104719755f)   /* eRPM → elec rad/s */
